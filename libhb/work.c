@@ -501,16 +501,19 @@ void hb_display_job_info(hb_job_t *job)
 
     if (hb_hwaccel_decode_is_enabled(job))
     {
-        hb_log("   + decoder: %s %d-bit %s (%s, %s)",
-               title->video_codec_name,
-               hb_get_bit_depth(job->input_pix_fmt),
+        hb_log("   + decoder: %s %s %d-bit (%s, %s)",
                hb_hwaccel_get_name(job->hw_decode),
+               avcodec_get_name(title->video_codec_param),
+               hb_get_bit_depth(job->input_pix_fmt),
                av_get_pix_fmt_name(job->input_pix_fmt),
                av_get_pix_fmt_name(job->hw_pix_fmt));
     }
     else
     {
-        hb_log("   + decoder: %s %d-bit (%s)", title->video_codec_name, hb_get_bit_depth(job->input_pix_fmt), av_get_pix_fmt_name(job->input_pix_fmt));
+        hb_log("   + decoder: %s %d-bit (%s)",
+            avcodec_get_name(title->video_codec_param),
+            hb_get_bit_depth(job->input_pix_fmt),
+            av_get_pix_fmt_name(job->input_pix_fmt));
     }
 
     if( title->video_bitrate )
@@ -1526,11 +1529,11 @@ static void sanitize_filter_list_post(hb_job_t *job)
     if (job->hw_pix_fmt == AV_PIX_FMT_VIDEOTOOLBOX)
     {
         hb_vt_setup_hw_filters(job);
+        return;
     }
 #endif
 
-    if ((job->hw_pix_fmt == AV_PIX_FMT_NONE || job->hw_pix_fmt == AV_PIX_FMT_QSV) &&
-        hb_video_encoder_pix_fmt_is_supported(job->vcodec, job->input_pix_fmt, job->encoder_profile) == 0)
+    if (hb_video_encoder_pix_fmt_is_supported(job->vcodec, job->input_pix_fmt, job->encoder_profile) == 0)
     {
         // Some encoders require a specific input pixel format
         // that could be different from the current pipeline format.
@@ -1709,6 +1712,10 @@ static void sanitize_dynamic_hdr_metadata_passthru(hb_job_t *job)
                                           pad_top, pad_bottom, pad_left, pad_right);
         hb_add_filter(job, filter, settings);
         free(settings);
+
+        job->color_range = job->passthru_dynamic_hdr_metadata & HB_HDR_DYNAMIC_METADATA_DOVI &&
+                          (job->dovi.dv_profile == 5 || (job->dovi.dv_profile == 10 && job->dovi.dv_bl_signal_compatibility_id == 0)) ?
+                           AVCOL_RANGE_JPEG : job->color_range;
 #else
         hb_log("work: libdovi not available, disabling Dolby Vision");
         job->passthru_dynamic_hdr_metadata &= ~HB_HDR_DYNAMIC_METADATA_DOVI;
@@ -1817,8 +1824,8 @@ static void do_job(hb_job_t *job)
         {
             hb_hwaccel_hw_ctx_init(job->title->video_codec_param,
                                    job->hw_decode,
-                                   &job->hw_device_ctx,
-                                   job);
+                                   job->hw_device_index,
+                                   &job->hw_device_ctx);
         }
 
         sanitize_filter_list_post(job);
@@ -1829,18 +1836,11 @@ static void do_job(hb_job_t *job)
         init.job = job;
         init.pix_fmt = job->input_pix_fmt;
         init.hw_pix_fmt = job->hw_pix_fmt;
-
-        init.color_prim = title->color_prim;
-        init.color_transfer = title->color_transfer;
-        init.color_matrix = title->color_matrix;
-        // Dolby Vision profile 5 requires full range
-        // TODO: find a better way to handle this
-        init.color_range = job->passthru_dynamic_hdr_metadata & HB_HDR_DYNAMIC_METADATA_DOVI &&
-                            (job->dovi.dv_profile == 5 ||
-                             (job->dovi.dv_profile == 10 && job->dovi.dv_bl_signal_compatibility_id == 0)) ?
-                            title->color_range : AVCOL_RANGE_MPEG;
-
-        init.chroma_location = title->chroma_location;
+        init.color_prim      = job->color_prim;
+        init.color_transfer  = job->color_transfer;
+        init.color_matrix    = job->color_matrix;
+        init.color_range     = job->color_range != AVCOL_RANGE_UNSPECIFIED ? job->color_range : title->color_range;
+        init.chroma_location = job->chroma_location;
         init.geometry = title->geometry;
         memset(init.crop, 0, sizeof(int[4]));
         init.vrate = job->vrate;

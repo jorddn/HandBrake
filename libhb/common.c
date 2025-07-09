@@ -1582,18 +1582,28 @@ void hb_video_quality_get_limits(uint32_t codec, float *low, float *high,
         case HB_VCODEC_FFMPEG_VCE_H264:
         case HB_VCODEC_FFMPEG_VCE_H265:
         case HB_VCODEC_FFMPEG_VCE_H265_10BIT:
-        case HB_VCODEC_FFMPEG_NVENC_H264:
-        case HB_VCODEC_FFMPEG_NVENC_H265:
-        case HB_VCODEC_FFMPEG_NVENC_AV1:
             *direction   = 1;
             *granularity = 0.1;
             *low         = 0.;
             *high        = 51.;
             break;
+        case HB_VCODEC_FFMPEG_NVENC_H264:
+        case HB_VCODEC_FFMPEG_NVENC_H265:
+        case HB_VCODEC_FFMPEG_NVENC_H265_10BIT:
+            *direction   = 1;
+            *granularity = 0.1;
+            *low         = 1.;
+            *high        = 51.;
+            break;
+        case HB_VCODEC_FFMPEG_NVENC_AV1:
+        case HB_VCODEC_FFMPEG_NVENC_AV1_10BIT:
+            *direction   = 1;
+            *granularity = 0.1;
+            *low         = 1.;
+            *high        = 63.;
+            break;
         case HB_VCODEC_X264_10BIT:
         case HB_VCODEC_X265_10BIT:
-        case HB_VCODEC_FFMPEG_NVENC_H265_10BIT:
-        case HB_VCODEC_FFMPEG_NVENC_AV1_10BIT:
             *direction   = 1;
             *granularity = 0.1;
             *low         = -12.;
@@ -4565,6 +4575,8 @@ static void job_setup(hb_job_t * job, hb_title_t * title)
 
     job->list_attachment = hb_attachment_list_copy( title->list_attachment );
     job->metadata = hb_metadata_copy( title->metadata );
+
+    job->hw_device_index = -1;
 
 #if HB_PROJECT_FEATURE_QSV
     job->qsv_ctx = hb_qsv_context_init();

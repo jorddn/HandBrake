@@ -2191,7 +2191,7 @@ static int hb_qsv_parse_options(hb_job_t *job)
                 free(str);
                 if (!err)
                 {
-                    job->qsv_ctx->async_depth = async_depth;
+                    job->hw_device_async_depth = async_depth;
                 }
             }
             else if (!strcasecmp(key, "memory-type"))
@@ -2207,19 +2207,6 @@ static int hb_qsv_parse_options(hb_job_t *job)
                     job->qsv_ctx->memory_type = mode->value;
                 }
             }
-            else if (!strcasecmp(key, "out_range"))
-            {
-                hb_triplet_t* mode = NULL;
-                mode = hb_triplet4key(hb_qsv_out_range_types, hb_value_get_string_xform(value));
-                if (!mode)
-                {
-                    err = HB_QSV_PARAM_BAD_VALUE;
-                }
-                else
-                {
-                    job->qsv_ctx->out_range = mode->value;
-                }
-            }
         }
         hb_dict_free(&options_list);
     }
@@ -2233,19 +2220,21 @@ int hb_qsv_setup_job(hb_job_t *job)
         return 1;
     }
 
+    job->hw_device_index = hb_qsv_get_default_adapter_index();
+
     // Parse the json parameter
-    if (job->qsv_ctx->dx_index >= -1)
+    if (job->hw_device_index >= -1)
     {
-        hb_qsv_param_parse_dx_index(job, job->qsv_ctx->dx_index);
+        hb_qsv_param_parse_dx_index(job, job->hw_device_index);
     }
 
     // Parse the advanced options parameter
     hb_qsv_parse_options(job);
 
     int async_depth_default = hb_qsv_param_default_async_depth();
-    if (job->qsv_ctx->async_depth <= 0 || job->qsv_ctx->async_depth > async_depth_default)
+    if (job->hw_device_async_depth <= 0 || job->hw_device_async_depth > async_depth_default)
     {
-        job->qsv_ctx->async_depth = async_depth_default;
+        job->hw_device_async_depth = async_depth_default;
     }
 
     // Make sure QSV Decode is only True if the selected QSV adapter supports decode
@@ -3238,10 +3227,6 @@ int hb_qsv_param_parse(AVDictionary** av_opts, hb_qsv_param_t *param, hb_qsv_inf
                 job->qsv_ctx->memory_type = mode->value;
         }
     }
-    else if (!strcasecmp(key, "out_range"))
-    {
-        // Already parsed in QSV initialization
-    }
     else if (!strcasecmp(key, "scalingmode") ||
              !strcasecmp(key, "vpp-sm"))
     {
@@ -3767,65 +3752,6 @@ const char* hb_qsv_profile_name(uint32_t codec_id, uint16_t profile_id)
     return profile != NULL ? profile->name : NULL;
 }
 
-const char* hb_qsv_frametype_name(uint16_t qsv_frametype)
-{
-    if      (qsv_frametype & MFX_FRAMETYPE_IDR)
-    {
-        return qsv_frametype & MFX_FRAMETYPE_REF ? "IDR (ref)" : "IDR";
-    }
-    else if (qsv_frametype & MFX_FRAMETYPE_I)
-    {
-        return qsv_frametype & MFX_FRAMETYPE_REF ? "I (ref)"   : "I";
-    }
-    else if (qsv_frametype & MFX_FRAMETYPE_P)
-    {
-        return qsv_frametype & MFX_FRAMETYPE_REF ? "P (ref)"   : "P";
-    }
-    else if (qsv_frametype & MFX_FRAMETYPE_B)
-    {
-        return qsv_frametype & MFX_FRAMETYPE_REF ? "B (ref)"   : "B";
-    }
-    else
-    {
-        return "unknown";
-    }
-}
-
-uint8_t hb_qsv_frametype_xlat(uint16_t qsv_frametype, uint16_t *out_flags)
-{
-    uint16_t flags     = 0;
-    uint8_t  frametype = 0;
-
-    if (qsv_frametype & MFX_FRAMETYPE_IDR)
-    {
-        flags |= HB_FLAG_FRAMETYPE_KEY;
-        frametype = HB_FRAME_IDR;
-    }
-    else if (qsv_frametype & MFX_FRAMETYPE_I)
-    {
-        frametype = HB_FRAME_I;
-    }
-    else if (qsv_frametype & MFX_FRAMETYPE_P)
-    {
-        frametype = HB_FRAME_P;
-    }
-    else if (qsv_frametype & MFX_FRAMETYPE_B)
-    {
-        frametype = HB_FRAME_B;
-    }
-
-    if (qsv_frametype & MFX_FRAMETYPE_REF)
-    {
-        flags |= HB_FLAG_FRAMETYPE_REF;
-    }
-
-    if (out_flags != NULL)
-    {
-       *out_flags = flags;
-    }
-    return frametype;
-}
-
 const char* hb_qsv_impl_get_name(int impl)
 {
     switch (MFX_IMPL_BASETYPE(impl))
@@ -3910,101 +3836,75 @@ int hb_qsv_param_parse_dx_index(hb_job_t *job, const int dx_index)
         // find DirectX adapter with given index in list of QSV adapters
         if (details && (details->index == dx_index))
         {
-            job->qsv_ctx->dx_index = details->index;
+            job->hw_device_index = details->index;
             hb_log("qsv: %s qsv adapter with index %u has been selected", hb_qsv_get_adapter_type(details), details->index);
             hb_qsv_set_adapter_index(details->index);
             return 0;
         }
     }
-    job->qsv_ctx->dx_index = hb_qsv_get_adapter_index();
+    job->hw_device_index = hb_qsv_get_adapter_index();
     return -1;
 }
 
-#if defined(_WIN32) || defined(__MINGW32__)
-
-int hb_qsv_are_filters_supported(hb_job_t *job)
+int hb_qsv_are_filters_supported(hb_list_t *filters)
 {
+#if defined(_WIN32) || defined(__MINGW32__)
     int num_sw_filters = 0;
-    if (job->list_filter != NULL && hb_list_count(job->list_filter) > 0)
+    for (int i = 0; i < hb_list_count(filters); i++)
     {
-        for (int i = 0; i < hb_list_count(job->list_filter); i++)
+        hb_filter_object_t *filter = hb_list_item(filters, i);
+        switch (filter->id)
         {
-            hb_filter_object_t *filter = hb_list_item(job->list_filter, i);
-            switch (filter->id)
+            // pixel format conversion is done via VPP filter
+            case HB_FILTER_FORMAT:
+            // cropping and scaling always done via VPP filter
+            case HB_FILTER_CROP_SCALE:
+            case HB_FILTER_ROTATE:
+            case HB_FILTER_AVFILTER:
+                break;
+            case HB_FILTER_VFR:
             {
-                // pixel format conversion is done via VPP filter
-                case HB_FILTER_FORMAT:
-                // cropping and scaling always done via VPP filter
-                case HB_FILTER_CROP_SCALE:
-                case HB_FILTER_ROTATE:
-                case HB_FILTER_AVFILTER:
-                    break;
-                case HB_FILTER_VFR:
+                // Mode 0 doesn't require access to the frame data
+                int mode = hb_dict_get_int(filter->settings, "mode");
+                if (mode == 0)
                 {
-                    // Mode 0 doesn't require access to the frame data
-                    int mode = hb_dict_get_int(filter->settings, "mode");
-                    if (mode == 0)
-                    {
-                        break;
-                    }
-                }
-                default:
-                    // count only filters with access to frame data
-                    num_sw_filters++;
                     break;
+                }
             }
+            default:
+                // count only filters with access to frame data
+                num_sw_filters++;
+                break;
         }
     }
     return num_sw_filters == 0;
-}
-
 #else // other OS
-
-int hb_qsv_are_filters_supported(hb_job_t *job)
-{
     return 0;
+#endif
 }
 
-#endif
-
-static int hb_qsv_ffmpeg_set_options(hb_job_t *job, AVDictionary** dict)
-{
-    AVDictionary* out_dict = *dict;
-
-#if defined(_WIN32) || defined(__MINGW32__)
-    if (job->qsv_ctx && job->qsv_ctx->dx_index >= 0)
-    {
-        int err;
-        char device[32];
-        snprintf(device, 32, "%u", job->qsv_ctx->dx_index);
-        err = av_dict_set(&out_dict, "child_device", device, 0);
-        if (err < 0)
-        {
-            return err;
-        }
-    }
-
-    av_dict_set(&out_dict, "child_device_type", "d3d11va", 0);
-#endif
-
-    *dict = out_dict;
-    return 0;
-}
-
-int hb_qsv_device_init(hb_job_t *job, void **hw_device_ctx)
+int hb_qsv_device_init(int dx_index, void **hw_device_ctx)
 {
     int err;
     AVDictionary *dict = NULL;
     AVBufferRef *ctx = NULL;
 
-    if (job)
+#if defined(_WIN32) || defined(__MINGW32__)
+    if (dx_index >= 0)
     {
-        err = hb_qsv_ffmpeg_set_options(job, &dict);
+        int err;
+        char device[32];
+
+        snprintf(device, 32, "%u", dx_index);
+        err = av_dict_set(&dict, "child_device", device, 0);
         if (err < 0)
         {
             return err;
         }
     }
+
+    av_dict_set(&dict, "child_device_type", "d3d11va", 0);
+#endif
 
     err = av_hwdevice_ctx_create(&ctx, AV_HWDEVICE_TYPE_QSV,
                                  0, dict, 0);
@@ -4037,8 +3937,6 @@ hb_qsv_context_t * hb_qsv_context_init()
         hb_error("hb_qsv_context_init: qsv ctx alloc failed");
         return NULL;
     }
-    ctx->dx_index = hb_qsv_get_default_adapter_index();
-    ctx->out_range = AVCOL_RANGE_UNSPECIFIED;
     return ctx;
 }
 
