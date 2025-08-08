@@ -74,9 +74,6 @@ static void source_dialog_start_scan(GtkFileChooser *chooser, int title_id);
 #define DBUS_LOGIND_SERVICE         "org.freedesktop.login1"
 #define DBUS_LOGIND_PATH            "/org/freedesktop/login1"
 #define DBUS_LOGIND_INTERFACE       "org.freedesktop.login1.Manager"
-#define GPM_DBUS_PM_SERVICE         "org.freedesktop.PowerManagement"
-#define GPM_DBUS_INHIBIT_PATH       "/org/freedesktop/PowerManagement/Inhibit"
-#define GPM_DBUS_INHIBIT_INTERFACE  "org.freedesktop.PowerManagement.Inhibit"
 #endif
 
 #if !defined(_WIN32)
@@ -267,26 +264,12 @@ shutdown_logind (void)
 #endif
 }
 
-#if !defined(_WIN32)
-// For inhibit and shutdown
-#define GPM_DBUS_SM_SERVICE         "org.gnome.SessionManager"
-#define GPM_DBUS_SM_PATH            "/org/gnome/SessionManager"
-#define GPM_DBUS_SM_INTERFACE       "org.gnome.SessionManager"
-#endif
-
-enum {
-    GHB_SUSPEND_UNINHIBITED = 0,
-    GHB_SUSPEND_INHIBITED_GPM,
-    GHB_SUSPEND_INHIBITED_GSM,
-    GHB_SUSPEND_INHIBITED_GTK
-};
-static int suspend_inhibited = GHB_SUSPEND_UNINHIBITED;
-static guint suspend_cookie;
+static guint suspend_cookie = 0;
 
 static void
 inhibit_suspend (void)
 {
-    if (suspend_inhibited != GHB_SUSPEND_UNINHIBITED)
+    if (suspend_cookie)
     {
         // Already inhibited
         return;
@@ -294,26 +277,17 @@ inhibit_suspend (void)
     suspend_cookie = gtk_application_inhibit(GTK_APPLICATION(GHB_APPLICATION_DEFAULT),
             NULL, GTK_APPLICATION_INHIBIT_SUSPEND | GTK_APPLICATION_INHIBIT_LOGOUT,
             _("An encode is in progress."));
-    if (suspend_cookie != 0)
-    {
-        suspend_inhibited = GHB_SUSPEND_INHIBITED_GTK;
-        return;
-    }
 }
 
 static void
 uninhibit_suspend (void)
 {
-    switch (suspend_inhibited)
+    if (suspend_cookie)
     {
-        case GHB_SUSPEND_INHIBITED_GTK:
-            gtk_application_uninhibit(GTK_APPLICATION(GHB_APPLICATION_DEFAULT),
-                                      suspend_cookie);
-            break;
-        default:
-            break;
+        gtk_application_uninhibit(GTK_APPLICATION(GHB_APPLICATION_DEFAULT),
+                                  suspend_cookie);
+        suspend_cookie = 0;
     }
-    suspend_inhibited = GHB_SUSPEND_UNINHIBITED;
 }
 
 // This is a dependency map used for greying widgets
@@ -1457,10 +1431,10 @@ show_scan_progress(signal_user_data_t *ud)
     GtkLabel       * label;
 
     widget = ghb_builder_widget("SourceInfoBox");
-    gtk_widget_hide(widget);
+    gtk_widget_set_visible(widget, FALSE);
 
     widget = ghb_builder_widget("SourceScanBox");
-    gtk_widget_show(widget);
+    gtk_widget_set_visible(widget, TRUE);
 
     progress = GTK_PROGRESS_BAR(ghb_builder_widget("scan_prog"));
     gtk_progress_bar_set_fraction(progress, 0);
@@ -1480,10 +1454,10 @@ hide_scan_progress(signal_user_data_t *ud)
     gtk_progress_bar_set_fraction(progress, 1.0);
 
     widget = ghb_builder_widget("SourceScanBox");
-    gtk_widget_hide(widget);
+    gtk_widget_set_visible(widget, FALSE);
 
     widget = ghb_builder_widget("SourceInfoBox");
-    gtk_widget_show(widget);
+    gtk_widget_set_visible(widget, TRUE);
 }
 
 static void
@@ -1676,11 +1650,11 @@ single_title_dialog (GtkFileChooser *chooser)
 
     adj = gtk_adjustment_new(1, 0, 1000, 1, 10, 10);
     spin = gtk_spin_button_new(adj, 1, 0);
-    gtk_widget_show(spin);
+    gtk_widget_set_visible(spin, TRUE);
     msg = gtk_message_dialog_get_message_area(GTK_MESSAGE_DIALOG(dialog));
     gtk_box_append(GTK_BOX(msg), spin);
     g_signal_connect(dialog, "response", G_CALLBACK(single_title_dialog_response), chooser);
-    gtk_widget_show(dialog);
+    gtk_widget_set_visible(dialog, TRUE);
 }
 
 static void
@@ -2345,16 +2319,16 @@ mini_preview_update (gboolean has_preview, signal_user_data_t *ud)
     if (ghb_dict_get_bool(ud->prefs, "ShowMiniPreview") && has_preview)
     {
         widget = ghb_builder_widget("summary_image");
-        gtk_widget_hide(widget);
+        gtk_widget_set_visible(widget, FALSE);
         widget = ghb_builder_widget("summary_preview_image");
-        gtk_widget_show(widget);
+        gtk_widget_set_visible(widget, TRUE);
     }
     else
     {
         widget = ghb_builder_widget("summary_image");
-        gtk_widget_show(widget);
+        gtk_widget_set_visible(widget, TRUE);
         widget = ghb_builder_widget("summary_preview_image");
-        gtk_widget_hide(widget);
+        gtk_widget_set_visible(widget, FALSE);
     }
 }
 
@@ -3815,7 +3789,7 @@ preferences_action_cb (GSimpleAction *action, GVariant *param, gpointer data)
 }
 
 G_MODULE_EXPORT gboolean
-prefs_response_cb (GtkDialog *dialog, GdkEvent *event, gpointer data)
+prefs_response_cb (GtkWindow *dialog, gpointer data)
 {
     ghb_prefs_store();
     gtk_widget_set_visible(GTK_WIDGET(dialog), FALSE);
@@ -3942,7 +3916,7 @@ ghb_countdown_dialog_show (const gchar *message, const gchar *action,
 
     g_signal_connect(dialog, "response",
                      G_CALLBACK(countdown_dialog_response), timeout_id);
-    gtk_widget_show(dialog);
+    gtk_widget_set_visible(dialog, TRUE);
 }
 
 G_GNUC_PRINTF(6, 0) static GtkMessageDialog *
@@ -4072,7 +4046,7 @@ ghb_alert_dialog_show (GtkMessageType type, const char *title,
         g_free(message);
     }
     g_signal_connect(dialog, "response", G_CALLBACK(message_dialog_destroy), NULL);
-    gtk_widget_show(dialog);
+    gtk_widget_set_visible(dialog, TRUE);
 }
 
 GtkWidget *
@@ -4143,7 +4117,7 @@ ghb_stop_encode_dialog_show (signal_user_data_t *ud)
         _("Finish Current and Stop"), _("Continue Encoding"));
     g_signal_connect(dialog, "response",
                      G_CALLBACK(stop_encode_dialog_response), ud);
-    gtk_widget_show(dialog);
+    gtk_widget_set_visible(dialog, TRUE);
 }
 
 static void
@@ -4166,7 +4140,7 @@ quit_dialog_show (void)
         _("Your movie will be lost if you don't continue encoding."),
         _("Cancel All and Quit"), NULL, NULL, _("Continue Encoding"));
     g_signal_connect(dialog, "response", G_CALLBACK(quit_dialog_response), NULL);
-    gtk_widget_show(dialog);
+    gtk_widget_set_visible(dialog, TRUE);
 }
 
 static void
@@ -4352,7 +4326,7 @@ ghb_start_next_job(signal_user_data_t *ud)
 
     ghb_log_func();
     progress = ghb_builder_widget("progressbar");
-    gtk_widget_show(progress);
+    gtk_widget_set_visible(progress, TRUE);
 
     count = ghb_array_len(ud->queue);
     for (ii = 0; ii < count; ii++)
@@ -4374,7 +4348,7 @@ ghb_start_next_job(signal_user_data_t *ud)
     ghb_send_notification(GHB_NOTIFY_QUEUE_DONE, 0, ud);
     queue_done_action(ud);
     ghb_update_pending(ud);
-    gtk_widget_hide(progress);
+    gtk_widget_set_visible(progress, FALSE);
     ghb_reset_disk_space_check();
 }
 
@@ -4752,7 +4726,7 @@ ghb_backend_events(signal_user_data_t *ud)
         else
         {
             uninhibit_suspend();
-            gtk_widget_hide(GTK_WIDGET(progress));
+            gtk_widget_set_visible(GTK_WIDGET(progress), FALSE);
             ghb_reset_disk_space_check();
         }
         ghb_save_queue(ud->queue);

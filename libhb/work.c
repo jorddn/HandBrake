@@ -218,7 +218,8 @@ hb_work_object_t* hb_audio_decoder(hb_handle_t *h, int codec)
     return w;
 }
 
-hb_work_object_t* hb_video_decoder(hb_handle_t *h, int vcodec, int param, void *hw_device_ctx)
+hb_work_object_t* hb_video_decoder(hb_handle_t *h, int vcodec, int param,
+                                   void *hw_device_ctx, hb_hwaccel_t *hw_accel)
 {
     hb_work_object_t * w;
 
@@ -230,6 +231,7 @@ hb_work_object_t* hb_video_decoder(hb_handle_t *h, int vcodec, int param, void *
     }
     w->codec_param = param;
     w->hw_device_ctx = hw_device_ctx;
+    w->hw_accel = hw_accel;
 
     return w;
 }
@@ -499,14 +501,14 @@ void hb_display_job_info(hb_job_t *job)
 
     hb_log(" * video track");
 
-    if (hb_hwaccel_decode_is_enabled(job))
+    if (job->hw_accel)
     {
         hb_log("   + decoder: %s %s %d-bit (%s, %s)",
-               hb_hwaccel_get_name(job->hw_decode),
+               job->hw_accel->name,
                avcodec_get_name(title->video_codec_param),
                hb_get_bit_depth(job->input_pix_fmt),
                av_get_pix_fmt_name(job->input_pix_fmt),
-               av_get_pix_fmt_name(job->hw_pix_fmt));
+               job->hw_pix_fmt != AV_PIX_FMT_NONE ? av_get_pix_fmt_name(job->hw_pix_fmt) : "sw");
     }
     else
     {
@@ -582,99 +584,19 @@ void hb_display_job_info(hb_job_t *job)
         }
         if (job->encoder_tune && *job->encoder_tune)
         {
-            switch (job->vcodec)
-            {
-                case HB_VCODEC_X264_8BIT:
-                case HB_VCODEC_X264_10BIT:
-                case HB_VCODEC_X265_8BIT:
-                case HB_VCODEC_X265_10BIT:
-                case HB_VCODEC_X265_12BIT:
-                case HB_VCODEC_X265_16BIT:
-                case HB_VCODEC_SVT_AV1:
-                case HB_VCODEC_SVT_AV1_10BIT:
-                case HB_VCODEC_FFMPEG_VP9:
-                case HB_VCODEC_FFMPEG_VP9_10BIT:
-                    hb_log("     + tune:    %s", job->encoder_tune);
-                default:
-                    break;
-            }
+            hb_log("     + tune:    %s", job->encoder_tune);
         }
-        if (job->encoder_options != NULL && *job->encoder_options &&
-            job->vcodec != HB_VCODEC_THEORA)
+        if (job->encoder_options != NULL && *job->encoder_options)
         {
             hb_log("     + options: %s", job->encoder_options);
         }
         if (job->encoder_profile && *job->encoder_profile)
         {
-            switch (job->vcodec)
-            {
-                case HB_VCODEC_X264_8BIT:
-                case HB_VCODEC_X264_10BIT:
-                case HB_VCODEC_X265_8BIT:
-                case HB_VCODEC_X265_10BIT:
-                case HB_VCODEC_X265_12BIT:
-                case HB_VCODEC_X265_16BIT:
-                case HB_VCODEC_FFMPEG_QSV_H264:
-                case HB_VCODEC_FFMPEG_QSV_H265:
-                case HB_VCODEC_FFMPEG_QSV_H265_10BIT:
-                case HB_VCODEC_FFMPEG_QSV_AV1:
-                case HB_VCODEC_FFMPEG_QSV_AV1_10BIT:
-                case HB_VCODEC_FFMPEG_VCE_H264:
-                case HB_VCODEC_FFMPEG_VCE_H265:
-                case HB_VCODEC_FFMPEG_VCE_H265_10BIT:
-                case HB_VCODEC_FFMPEG_VCE_AV1:
-                case HB_VCODEC_FFMPEG_NVENC_H264:
-                case HB_VCODEC_FFMPEG_NVENC_H265:
-                case HB_VCODEC_FFMPEG_NVENC_H265_10BIT:
-                case HB_VCODEC_FFMPEG_NVENC_AV1:
-                case HB_VCODEC_FFMPEG_NVENC_AV1_10BIT:
-                case HB_VCODEC_VT_H264:
-                case HB_VCODEC_VT_H265:
-                case HB_VCODEC_VT_H265_10BIT:
-                case HB_VCODEC_FFMPEG_MF_H264:
-                case HB_VCODEC_FFMPEG_MF_H265:
-                case HB_VCODEC_FFMPEG_MF_AV1:
-                case HB_VCODEC_SVT_AV1:
-                case HB_VCODEC_SVT_AV1_10BIT:
-                    hb_log("     + profile: %s", job->encoder_profile);
-                default:
-                    break;
-            }
+            hb_log("     + profile: %s", job->encoder_profile);
         }
         if (job->encoder_level && *job->encoder_level)
         {
-            switch (job->vcodec)
-            {
-                case HB_VCODEC_X264_8BIT:
-                case HB_VCODEC_X264_10BIT:
-                case HB_VCODEC_X265_8BIT:
-                case HB_VCODEC_X265_10BIT:
-                case HB_VCODEC_X265_12BIT:
-                case HB_VCODEC_FFMPEG_QSV_H264:
-                case HB_VCODEC_FFMPEG_QSV_H265:
-                case HB_VCODEC_FFMPEG_QSV_H265_10BIT:
-                case HB_VCODEC_FFMPEG_QSV_AV1:
-                case HB_VCODEC_FFMPEG_QSV_AV1_10BIT:
-                case HB_VCODEC_FFMPEG_VCE_H264:
-                case HB_VCODEC_FFMPEG_VCE_H265:
-                case HB_VCODEC_FFMPEG_VCE_H265_10BIT:
-                case HB_VCODEC_FFMPEG_VCE_AV1:
-                case HB_VCODEC_FFMPEG_NVENC_H264:
-                case HB_VCODEC_FFMPEG_NVENC_H265:
-                case HB_VCODEC_FFMPEG_NVENC_H265_10BIT:
-                case HB_VCODEC_FFMPEG_NVENC_AV1:
-                case HB_VCODEC_FFMPEG_NVENC_AV1_10BIT:
-                case HB_VCODEC_VT_H264:
-                case HB_VCODEC_VT_H265_10BIT:
-                case HB_VCODEC_SVT_AV1:
-                case HB_VCODEC_SVT_AV1_10BIT:
-                // MF h.264/h.265 currently only supports auto level
-                // case HB_VCODEC_FFMPEG_MF_H264:
-                // case HB_VCODEC_FFMPEG_MF_H265:
-                    hb_log("     + level:   %s", job->encoder_level);
-                default:
-                    break;
-            }
+            hb_log("     + level:   %s", job->encoder_level);
         }
 
         if (job->vquality > HB_INVALID_VIDEO_QUALITY)
@@ -1727,7 +1649,7 @@ static void sanitize_dynamic_hdr_metadata_passthru(hb_job_t *job)
     // the dynamic hdr side data
     if (job->passthru_dynamic_hdr_metadata)
     {
-        job->hw_decode &= ~HB_DECODE_SUPPORT_QSV;
+        job->hw_decode &= ~HB_DECODE_QSV;
     }
 #endif
 }
@@ -1786,11 +1708,7 @@ static void do_job(hb_job_t *job)
     {
         job->hw_decode = 0;
     }
-    if (job->hw_decode & HB_DECODE_SUPPORT_MF)
-    {
-        job->hw_decode |= HB_DECODE_SUPPORT_FORCE_HW;
-    }
-    else if (job->hw_decode & HB_DECODE_SUPPORT_QSV)
+    if (job->hw_decode & HB_DECODE_QSV)
     {
         #if HB_PROJECT_FEATURE_QSV
         hb_qsv_setup_job(job);
@@ -1815,18 +1733,38 @@ static void do_job(hb_job_t *job)
         sanitize_filter_list_pre(job, title->geometry);
         sanitize_dynamic_hdr_metadata_passthru(job);
 
-        // Select the optimal pixel formats for the pipeline
-        job->hw_pix_fmt = hb_get_best_hw_pix_fmt(job);
-        job->input_pix_fmt = hb_get_best_pix_fmt(job);
+        job->hw_pix_fmt = AV_PIX_FMT_NONE;
+
+        // Initialize the hardware acceleration if possible
+        hb_hwaccel_t *hwaccel = hb_get_hwaccel(job->hw_decode);
+        if (hb_hwaccel_can_use_full_hw_pipeline(hwaccel,
+                                                job->list_filter,
+                                                job->vcodec,
+                                                job->title->rotation))
+        {
+            job->hw_accel = hwaccel;
+            job->hw_pix_fmt = hwaccel->hw_pix_fmt;
+        }
+        else if (job->hw_decode & HB_DECODE_FORCE_HW)
+        {
+            job->hw_accel = hwaccel;
+        }
 
         // Init hwaccel context if needed
-        if (hb_hwaccel_decode_is_enabled(job))
+        if (job->hw_accel)
         {
-            hb_hwaccel_hw_ctx_init(job->title->video_codec_param,
-                                   job->hw_decode,
-                                   job->hw_device_index,
-                                   &job->hw_device_ctx);
+            result = hb_hwaccel_hw_device_ctx_init(job->hw_accel->type,
+                                                   job->hw_device_index,
+                                                  &job->hw_device_ctx);
+            if (result)
+            {
+                job->hw_accel = NULL;
+                job->hw_pix_fmt = AV_PIX_FMT_NONE;
+            }
         }
+
+        // Select the optimal pixel formats for the pipeline
+        job->input_pix_fmt = hb_get_best_pix_fmt(job);
 
         sanitize_filter_list_post(job);
 
@@ -2023,7 +1961,8 @@ static void do_job(hb_job_t *job)
     }
 
     // Video decoder
-    w = hb_video_decoder(job->h, title->video_codec, title->video_codec_param, job->hw_device_ctx);
+    w = hb_video_decoder(job->h, title->video_codec, title->video_codec_param,
+                         job->hw_device_ctx, job->hw_accel);
     if (w == NULL)
     {
         *job->done_error = HB_ERROR_WRONG_INPUT;
@@ -2289,7 +2228,7 @@ cleanup:
     }
 
     hb_buffer_pool_free();
-    hb_hwaccel_hw_ctx_close(&job->hw_device_ctx);
+    hb_hwaccel_hw_device_ctx_close(&job->hw_device_ctx);
 }
 
 static inline void copy_chapter( hb_buffer_t * dst, hb_buffer_t * src )

@@ -1050,11 +1050,18 @@ int hb_preset_job_add_audio(hb_handle_t *h, int title_index,
         add_audio_for_lang(list, preset, title, mux, copy_mask, fallback,
                            lang, behavior, mode, track_dict);
     }
-    // If AudioLanguageList is empty, try "any" language option
+    // If AudioLanguageList is empty, or AudioTrackSelectionBehavior
+    // is "first" and no track was found, try "any" language option
     if (count <= 0)
     {
         add_audio_for_lang(list, preset, title, mux, copy_mask, fallback,
                            "any", behavior, mode, track_dict);
+    }
+    else if (behavior != 0 && hb_value_array_len(list) == 0)
+    {
+        // Only add the first track
+        add_audio_for_lang(list, preset, title, mux, copy_mask, fallback,
+                           "any", 1, mode, track_dict);
     }
     hb_dict_free(&track_dict);
     return 0;
@@ -1929,7 +1936,7 @@ int hb_preset_apply_filters(const hb_dict_t *preset, hb_dict_t *job_dict)
 
 int hb_preset_apply_video(const hb_dict_t *preset, hb_dict_t *job_dict)
 {
-    hb_dict_t    *dest_dict, *video_dict, *qsv;
+    hb_dict_t    *dest_dict, *video_dict;
     hb_value_t   *value, *vcodec_value;
     int           mux, vcodec, vqtype, color_matrix_code;
     const char   *color_range;
