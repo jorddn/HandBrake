@@ -16,7 +16,7 @@ namespace HandBrakeWPF.ViewModels
     using System.Diagnostics;
     using System.IO;
     using System.Linq;
-    using System.Threading.Tasks;
+    using System.Runtime.InteropServices;
     using System.Windows;
     using System.Windows.Input;
 
@@ -163,7 +163,7 @@ namespace HandBrakeWPF.ViewModels
                 this.NotifyOfPropertyChange(() => this.JobInfoVisible);
             }
         }
-        
+
         public bool JobInfoVisible => SelectedItems.Count == 1 && this.SelectedTask != null && this.SelectedTask.TaskType != QueueTaskType.Breakpoint;
 
         public int SelectedTabIndex { get; set; }
@@ -181,7 +181,7 @@ namespace HandBrakeWPF.ViewModels
         public bool IsSimpleView { get; set; }
 
         public bool CanPlayFile =>
-            this.SelectedTask != null && this.SelectedTask.Task != null && this.SelectedTask.Task.Destination != null && 
+            this.SelectedTask != null && this.SelectedTask.Task != null && this.SelectedTask.Task.Destination != null &&
             this.SelectedTask.Status == QueueItemStatus.Completed && File.Exists(this.SelectedTask.Task.Destination);
 
         public bool StatsVisible
@@ -414,7 +414,7 @@ namespace HandBrakeWPF.ViewModels
             }
 
             if (this.QueueTasks.Any() && removed)
-            {              
+            {
                 this.SelectedTask = index > 1 ? this.QueueTasks[index - 1] : this.QueueTasks.FirstOrDefault();
             }
         }
@@ -460,7 +460,7 @@ namespace HandBrakeWPF.ViewModels
                     Resources.QueueViewModel_NoPendingJobs, Resources.Error, MessageBoxButton.OK, MessageBoxImage.Error);
                 return;
             }
-            
+
             // Low disk space Check
             var firstOrDefault = this.QueueTasks.FirstOrDefault(s => s.Status == QueueItemStatus.Waiting);
             if (firstOrDefault != null && !DriveUtilities.HasMinimumDiskSpace(firstOrDefault.Task.Destination,
@@ -542,12 +542,12 @@ namespace HandBrakeWPF.ViewModels
         public void Export()
         {
             SaveFileDialog dialog = new SaveFileDialog
-                                    {
-                                        Filter = "Json (*.json)|*.json",
-                                        OverwritePrompt = true,
-                                        DefaultExt = ".json",
-                                        AddExtension = true
-                                    };
+            {
+                Filter = "Json (*.json)|*.json",
+                OverwritePrompt = true,
+                DefaultExt = ".json",
+                AddExtension = true
+            };
 
             if (dialog.ShowDialog() == true)
             {
@@ -636,7 +636,7 @@ namespace HandBrakeWPF.ViewModels
                 {
                     this.RetryJob(task);
                 }
-            }       
+            }
         }
 
         public void ResetAllJobs()
@@ -649,7 +649,7 @@ namespace HandBrakeWPF.ViewModels
                 }
             }
         }
-        
+
         public void ResetFailed()
         {
             foreach (var task in this.QueueTasks)
@@ -676,9 +676,9 @@ namespace HandBrakeWPF.ViewModels
                 try
                 {
                     Process p = new()
-                                {
-                                    StartInfo = new(this.SelectedTask.Task.Destination) { UseShellExecute = true }
-                                };
+                    {
+                        StartInfo = new(this.SelectedTask.Task.Destination) { UseShellExecute = true }
+                    };
                     p.Start();
                 }
                 catch (Win32Exception exc)
@@ -742,20 +742,43 @@ namespace HandBrakeWPF.ViewModels
                 {
                     if (File.Exists(directory))
                     {
-                        string argument = "/select, \"" + directory + "\"";
-                        Process.Start("explorer.exe", argument);
-                        return;
-                    }
-                    
-                    if (!File.Exists(directory) && !directory.EndsWith("\\"))
-                    {
-                        directory = Path.GetDirectoryName(directory) + "\\";
-                    }
+                        string folderPath = Path.GetDirectoryName(directory);
+                        string file = Path.GetFileName(directory);
 
-                    directory = Path.GetDirectoryName(directory);
-                    if (directory != null && Directory.Exists(directory))
+                        Win32.SHParseDisplayName(folderPath, IntPtr.Zero, out nint nativeFolder, 0, out _);
+
+                        if (nativeFolder == IntPtr.Zero)
+                        {
+                            // Log error, can't find folder
+                            return;
+                        }
+
+                        Win32.SHParseDisplayName(Path.Combine(folderPath, file), IntPtr.Zero, out nint nativeFile, 0, out _);
+
+                        IntPtr[] fileArray = nativeFile == IntPtr.Zero ? [] : [nativeFile];
+
+                        _ = Win32.SHOpenFolderAndSelectItems(nativeFolder, (uint)fileArray.Length, fileArray, 0);
+
+                        if (nativeFile != IntPtr.Zero)
+                        {
+                            Marshal.FreeCoTaskMem(nativeFile);
+                        }
+
+                        Marshal.FreeCoTaskMem(nativeFolder);
+                    }
+                    else
                     {
-                        Process.Start("explorer.exe", directory);
+                        if (!File.Exists(directory) && !directory.EndsWith('\\'))
+                        {
+                            directory = Path.GetDirectoryName(directory) + "\\";
+                        }
+
+                        Process.Start(new ProcessStartInfo()
+                        {
+                            FileName = directory,
+                            UseShellExecute = true,
+                            Verb = "open"
+                        });
                     }
                 }
             }
@@ -833,7 +856,7 @@ namespace HandBrakeWPF.ViewModels
         {
             this.NotifyOfPropertyChange(() => this.JobInfoVisible);
         }
-        
+
         private void QueueManager_QueueChanged(object sender, EventArgs e)
         {
             this.JobsPending = string.Format(Resources.QueueViewModel_JobsPending, this.queueProcessor.Count);
