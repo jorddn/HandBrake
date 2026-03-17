@@ -1,0 +1,130 @@
+name: Windows GUI Build
+
+on: [push, workflow_dispatch]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build_gui:
+    name: Windows GUI
+    runs-on: windows-2022
+    # needs: [build_mingw]
+    env:
+      SigningCertificate: ${{ secrets.HandBrakeTeam_SignFile }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Cache LibHandBrake
+        id: windows-libhb
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/win/CS/HandBrakeWPF/bin/publish/hb.dll
+          key: ${{ runner.os }}-libhb
+
+      - name: Download LibHandBrake
+        if: steps.windows-libhb.outputs.cache-hit != 'true'
+        run: |
+          Write-Host "Fetching HandBrake releases..."
+          $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/HandBrake/HandBrake/releases"
+
+          # Find the latest release tag starting with 1.11.
+          $tag = ($releases | Where-Object { $_.tag_name -match '^1\.10\.' } | Sort-Object -Property tag_name -Descending | Select-Object -First 1).tag_name
+          Write-Host "Latest 1.11 release tag: $tag"
+
+          # Find the asset URL for LibHB-1.11.*-win-x86_64.zip
+          $asset = ($releases |
+            Where-Object { $_.tag_name -eq $tag } |
+            ForEach-Object { $_.assets } |
+            Where-Object { $_.name -match '^LibHB-1\.10\..*-win-x86_64\.zip$' } |
+            Select-Object -First 1)
+
+          if (-not $asset) {
+            Write-Error "Could not find LibHB-1.11.*-win-x86_64.zip in release $tag"
+            exit 1
+          }
+
+          $url = $asset.browser_download_url
+          Write-Host "Downloading: $url"
+
+          # Download and extract hb.dll
+          $tempDir = "./tmp"
+          $outputDir = "./win/CS/HandBrakeWPF/bin/publish"
+          New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
+          New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
+
+          $zipPath = Join-Path $tempDir "libhb.zip"
+          Invoke-WebRequest -Uri $url -OutFile $zipPath
+
+          Write-Host "Extracting hb.dll..."
+          Expand-Archive -Path $zipPath -DestinationPath $tempDir -Force
+
+          # Copy only hb.dll to the target directory
+          $hbDll = Get-ChildItem -Path $tempDir -Recurse -Filter "hb.dll" | Select-Object -First 1
+          if ($hbDll) {
+            Copy-Item $hbDll.FullName -Destination $outputDir -Force
+            Write-Host "✅ hb.dll extracted to $outputDir"
+          } else {
+            Write-Error "hb.dll not found in the downloaded archive."
+            exit 1
+          }
+
+          # Cleanup
+          Remove-Item $tempDir -Recurse -Force
+
+      - name: Import the Signing Cert
+        run: |
+          $ErrorView = "NormalView"
+          if (-NOT ($env:SigningCertificate -eq '')) {
+            $pfx_cert_byte = [System.Convert]::FromBase64String("${{ secrets.HandBrakeTeam_Pfx }}")
+            $currentDirectory = Get-Location
+            $certificatePath = Join-Path -Path $currentDirectory -ChildPath $env:SigningCertificate
+            $certPassword = ConvertTo-SecureString -String ${{ secrets.HandBrakeTeam_pfx_pwd }} -Force -AsPlainText
+            [IO.File]::WriteAllBytes("$certificatePath", $pfx_cert_byte)
+            cp $certificatePath win\cs\
+          }
+
+      - name: Build Windows GUI
+        run: |
+          $env:Path += ";C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Current\Bin"
+          msbuild win\cs\build.xml /t:x64 /p:PfxFile=$env:SigningCertificate /p:PfxPwd=${{ secrets.HandBrakeTeam_pfx_pwd }} /p:SignTimestampServer=http://time.certum.pl/ /p:Profile=Release
+
+      - name: Prepare Package
+        run: |
+          echo "Setting up context"
+          dir
+          git rev-parse --short HEAD > gitHash.txt
+          set /p gitHash=<gitHash.txt
+          set FILENAME=HandBrake-%gitHash%-x64-Win_GUI.exe
+          set FILENAMEZIP=HandBrake-%gitHash%-x64-Win_GUI.zip
+          echo %FILENAME%
+          echo %FILENAMEZIP%
+          echo "Renaming Windows Installer file"
+          cd win/CS/HandBrakeWPF/bin/publish/
+          dir
+          move HandBrake-*-Win_GUI.exe %FILENAME%
+          dir
+          cd ..
+          dir
+          echo "Creating Zip Package"
+          rmdir /q /s Debug
+          move publish HandBrake
+          7z a %FILENAMEZIP% * -x!Release\ -x!HandBrake\%FILENAME% -x!HandBrake\*.nsi -x!HandBrake\*.config -x!*HandBrake\*.xml -x!*HandBrake\*.pdb -x!*HandBrake\*.bmp  -x!HandBrake\*.zip -x!HandBrake\*.bz2 -x!HandBrake\*.msi -mx9
+          dir
+          cd ../../../../
+          dir
+        shell: cmd
+
+      - name: Upload HandBrake Installer
+        uses: actions/upload-artifact@v6
+        with:
+          name: HandBrake-Win_GUI-x64
+          path: win/CS/HandBrakeWPF/bin/HandBrake/HandBrake*.exe
+
+      - name: Upload HandBrake ZIP
+        uses: actions/upload-artifact@v6
+        with:
+          name: HandBrake-Win_GUI-x64-Zip
+          path: win/CS/HandBrakeWPF/bin/*-Win_GUI.zip

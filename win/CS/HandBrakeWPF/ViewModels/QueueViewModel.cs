@@ -766,22 +766,47 @@ namespace HandBrakeWPF.ViewModels
             {
                 if (!string.IsNullOrEmpty(directory))
                 {
+                    directory = Path.GetFullPath(directory);
+
                     if (File.Exists(directory))
                     {
-                        string argument = "/select, \"" + directory + "\"";
-                        Process.Start("explorer.exe", argument);
-                        return;
-                    }
-                    
-                    if (!File.Exists(directory) && !directory.EndsWith("\\"))
-                    {
-                        directory = Path.GetDirectoryName(directory) + "\\";
-                    }
+                        string folderPath = Path.GetDirectoryName(directory);
+                        string file = Path.GetFileName(directory);
 
-                    directory = Path.GetDirectoryName(directory);
-                    if (directory != null && Directory.Exists(directory))
+                        Win32.SHParseDisplayName(folderPath, IntPtr.Zero, out nint nativeFolder, 0, out _);
+
+                        if (nativeFolder == IntPtr.Zero)
+                        {
+                            // Log error, can't find folder
+                            return;
+                        }
+
+                        Win32.SHParseDisplayName(Path.Combine(folderPath, file), IntPtr.Zero, out nint nativeFile, 0, out _);
+
+                        IntPtr[] fileArray = nativeFile == IntPtr.Zero ? [] : [nativeFile];
+
+                        _ = Win32.SHOpenFolderAndSelectItems(nativeFolder, (uint)fileArray.Length, fileArray, 0);
+
+                        if (nativeFile != IntPtr.Zero)
+                        {
+                            Marshal.FreeCoTaskMem(nativeFile);
+                        }
+
+                        Marshal.FreeCoTaskMem(nativeFolder);
+                    }
+                    else
                     {
-                        Process.Start("explorer.exe", directory);
+                        if (!File.Exists(directory) && !directory.EndsWith(Path.DirectorySeparatorChar))
+                        {
+                            directory += Path.DirectorySeparatorChar;
+                        }
+
+                        Process.Start(new ProcessStartInfo()
+                        {
+                            FileName = directory,
+                            UseShellExecute = true,
+                            Verb = "open"
+                        });
                     }
                 }
             }
