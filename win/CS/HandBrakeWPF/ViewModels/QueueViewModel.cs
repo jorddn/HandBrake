@@ -799,7 +799,7 @@ namespace HandBrakeWPF.ViewModels
                     {
                         if (!File.Exists(directory) && !directory.EndsWith(Path.DirectorySeparatorChar))
                         {
-                            directory += Path.DirectorySeparatorChar;
+                            directory = Path.GetDirectoryName(directory) + Path.DirectorySeparatorChar;
                         }
 
                         Process.Start(new ProcessStartInfo()
