@@ -82,7 +82,7 @@ jobs:
             $pfx_cert_byte = [System.Convert]::FromBase64String("${{ secrets.HandBrakeTeam_Pfx }}")
             $currentDirectory = Get-Location
             $certificatePath = Join-Path -Path $currentDirectory -ChildPath $env:SigningCertificate
-            $certPassword = ConvertTo-SecureString -String ${{ secrets.HandBrakeTeam_pfx_pwd }} -Force -AsPlainText
+            $certPassword = ConvertTo-SecureString -String ${{ secrets.HandBrakeTeam_pfx_pwd }} -Force –AsPlainText
             [IO.File]::WriteAllBytes("$certificatePath", $pfx_cert_byte)
             cp $certificatePath win\cs\
           }
@@ -99,8 +99,7 @@ jobs:
       - name: Build Windows GUI
         shell: pwsh
         run: |
-          dotnet msbuild win\cs\build.xml /t:x64 /p:PfxFile=$env:SigningCertificate /p:PfxPwd=${{ secrets.HandBrakeTeam_pfx_pwd }} /p:SignTimestampServer=http://time.certum.pl/
-
+          dotnet msbuild win\cs\build.xml /t:x64 /p:PfxFile=$env:SigningCertificate /p:PfxPwd=${{ secrets.HandBrakeTeam_pfx_pwd }} /p:SignTimestampServer=http://time.certum.pl/ /p:Profile=Release
 
       - name: Prepare Package
         run: |
