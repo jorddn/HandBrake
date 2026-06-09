@@ -2520,14 +2520,30 @@ int hb_audio_dither_get_default_method()
     return SWR_DITHER_TRIANGULAR;
 }
 
-int hb_audio_dither_is_supported(uint32_t codec, int depth)
+int hb_audio_dither_is_supported(uint32_t codec, int source_depth)
 {
-    // Since dithering is performed by swresample, all codecs are supported
+    /*
+     * Enable/allow for encoder(s) taking 16-bit integers as input,
+     * but only in cases where the source is > 16-bit (or unknown).
+     *
+     * Lossy encoders are not exempt, as the rounding/truncation errors
+     * which dithering is meant to rectify happen while downsampling to
+     * 16bit; whether the encoder uses a higher/variable internal depth
+     * does not eliminate the need to dither following the >16 to 16bit
+     * conversion performed to create the input samples to said encoder.
+     */
     switch (codec)
     {
+        case HB_ACODEC_FDK_AAC:
+        case HB_ACODEC_FDK_HAAC:
+        case HB_ACODEC_FFALAC:
         case HB_ACODEC_FFFLAC:
-            if (depth == 0 || depth > 16)
+        case HB_ACODEC_FFPCM16:
+            if (source_depth == 0 || source_depth > 16)
                 return 1;
+        // fall through
+        default:
+            break;
     }
     return 0;
 }
@@ -2643,32 +2659,91 @@ int hb_mixdown_has_codec_support(int mixdown, uint32_t codec)
     if (mixdown == HB_AMIXDOWN_NONE)
         return 0;
 
+    // Not an actual audio encoder
+    if (codec == HB_ACODEC_NONE)
+        return 0;
+
+    /*
+     * for clarity: explicitly list/test every mixdown above 2 channels
+     *              list all encoders separately in alphabetical order
+     */
     switch (codec)
     {
-        case HB_ACODEC_VORBIS:
+        case HB_ACODEC_AC3:
+        case HB_ACODEC_FFEAC3:
+            return ((mixdown <= HB_AMIXDOWN_DOLBYPLII) ||
+                    (mixdown == HB_AMIXDOWN_5POINT1));
+
+        case HB_ACODEC_CA_AAC:
+            return ((mixdown <= HB_AMIXDOWN_DOLBYPLII) ||
+                    (mixdown == HB_AMIXDOWN_5POINT1)   ||
+                    (mixdown == HB_AMIXDOWN_6POINT1)   ||
+                    (mixdown == HB_AMIXDOWN_7POINT1)   ||
+                    (mixdown == HB_AMIXDOWN_5_2_LFE));
+
+        case HB_ACODEC_CA_HAAC:
+            return ((mixdown <= HB_AMIXDOWN_DOLBYPLII) ||
+                    (mixdown == HB_AMIXDOWN_5POINT1)   ||
+                    (mixdown == HB_AMIXDOWN_7POINT1)   ||
+                    (mixdown == HB_AMIXDOWN_5_2_LFE));
+
+        case HB_ACODEC_FDK_AAC:
+        case HB_ACODEC_FDK_HAAC:
+            return ((mixdown <= HB_AMIXDOWN_DOLBYPLII) ||
+                    (mixdown == HB_AMIXDOWN_5POINT1)   ||
+                    (mixdown == HB_AMIXDOWN_7POINT1));
+
+        case HB_ACODEC_FFAAC:
+            return ((mixdown <= HB_AMIXDOWN_DOLBYPLII) ||
+                    (mixdown == HB_AMIXDOWN_5POINT1));
+
         case HB_ACODEC_FFALAC:
         case HB_ACODEC_FFALAC24:
+            return ((mixdown <= HB_AMIXDOWN_DOLBYPLII) ||
+                    (mixdown == HB_AMIXDOWN_5POINT1)   ||
+                    (mixdown == HB_AMIXDOWN_6POINT1)   ||
+                    (mixdown == HB_AMIXDOWN_5_2_LFE));
+
         case HB_ACODEC_FFFLAC:
         case HB_ACODEC_FFFLAC24:
+            return ((mixdown <= HB_AMIXDOWN_DOLBYPLII) ||
+                    (mixdown == HB_AMIXDOWN_5POINT1)   ||
+                    (mixdown == HB_AMIXDOWN_6POINT1)   ||
+                    (mixdown == HB_AMIXDOWN_7POINT1)   ||
+                    (mixdown == HB_AMIXDOWN_5_2_LFE));
+
         case HB_ACODEC_FFPCM16:
         case HB_ACODEC_FFPCM24:
-        case HB_ACODEC_OPUS:
-        case HB_ACODEC_CA_AAC:
-        case HB_ACODEC_CA_HAAC:
-        case HB_ACODEC_FFAAC:
-            return (mixdown <= HB_AMIXDOWN_7POINT1);
+            return ((mixdown <= HB_AMIXDOWN_DOLBYPLII) ||
+                    (mixdown == HB_AMIXDOWN_5POINT1)   ||
+                    (mixdown == HB_AMIXDOWN_6POINT1)   ||
+                    (mixdown == HB_AMIXDOWN_7POINT1)   ||
+                    (mixdown == HB_AMIXDOWN_5_2_LFE));
+
+        case HB_ACODEC_FFTRUEHD:
+            return ((mixdown <= HB_AMIXDOWN_DOLBYPLII) ||
+                    (mixdown == HB_AMIXDOWN_5POINT1));
 
         case HB_ACODEC_LAME:
             return (mixdown <= HB_AMIXDOWN_DOLBYPLII);
 
-        case HB_ACODEC_FDK_AAC:
-        case HB_ACODEC_FDK_HAAC:
-            return ((mixdown <= HB_AMIXDOWN_5POINT1) ||
+        case HB_ACODEC_OPUS:
+            return ((mixdown <= HB_AMIXDOWN_DOLBYPLII) ||
+                    (mixdown == HB_AMIXDOWN_5POINT1)   ||
+                    (mixdown == HB_AMIXDOWN_6POINT1)   ||
+                    (mixdown == HB_AMIXDOWN_7POINT1));
+
+        case HB_ACODEC_VORBIS:
+            return ((mixdown <= HB_AMIXDOWN_DOLBYPLII) ||
+                    (mixdown == HB_AMIXDOWN_5POINT1)   ||
+                    (mixdown == HB_AMIXDOWN_6POINT1)   ||
                     (mixdown == HB_AMIXDOWN_7POINT1));
 
         default:
-            return (mixdown <= HB_AMIXDOWN_5POINT1);
+            break;
     }
+    hb_error("hb_mixdown_has_codec_support not explicitly implemented for encoder: %"PRIu32"", codec);
+    return 0;
 }
 
 int hb_mixdown_has_remix_support(int mixdown, hb_channel_layout_t *ch_layout)
